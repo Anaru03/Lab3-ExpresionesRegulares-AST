@@ -9,6 +9,10 @@ def simplificador_expresiones(regex):
                 resultado += c + c + '*'
                 i += 2
                 continue
+            elif siguiente == '?':
+                resultado += c + '|ε'
+                i += 2
+                continue
         resultado += c
         i += 1
     return resultado
