@@ -1,3 +1,15 @@
+# Se utiliza librería Graphviz para generar un Grafo dirigido https://graphviz.gitlab.io/download/
+from graphviz import Digraph
+import os
+
+# Nodo AST
+class NodoAST:
+    def __init__(self, valor, izq=None, der=None):
+        self.valor = valor
+        self.izq = izq
+        self.der = der
+
+# Simplificar operaciones
 def simplificador_expresiones(regex):
     resultado = ""
     i = 0
@@ -17,41 +29,72 @@ def simplificador_expresiones(regex):
         i += 1
     return resultado
 
-
-def get_precedence(op):
-    precedences = {'*': 3, '.': 2, '|': 1}
-    return precedences.get(op, 0)
-
-def format_regex(regex):
-    formatted = ""
-    for i in range(len(regex)):
+def insertar_concatenacion(regex):
+    resultado = ""
+    for i in range(len(regex) - 1):
         c1 = regex[i]
-        formatted += c1
-        if i + 1 < len(regex):
-            c2 = regex[i + 1]
-            if (c1 not in '(|' and c2 not in '|)*'):
-                formatted += '.'
-    return formatted
+        c2 = regex[i + 1]
+        resultado += c1
+        if c1 not in '(|' and c2 not in '|)*':
+            resultado += '.'
+    resultado += regex[-1]
+    return resultado
 
+# Shunting yard (Lab2)
 def infix_to_postfix(regex):
-    stack = []
-    output = ""
+    precedencia = {'*': 3, '.': 2, '|': 1}
+    salida = ''
+    pila = []
     for c in regex:
         if c.isalnum() or c == 'ε':
-            output += c
+            salida += c
         elif c == '(':
-            stack.append(c)
+            pila.append(c)
         elif c == ')':
-            while stack and stack[-1] != '(':
-                output += stack.pop()
-            stack.pop()  # Quita el '('
+            while pila and pila[-1] != '(':
+                salida += pila.pop()
+            pila.pop()  # Quita el '('
         else:
-            while stack and get_precedence(c) <= get_precedence(stack[-1]):
-                output += stack.pop()
-            stack.append(c)
-    while stack:
-        output += stack.pop()
-    return output
+            while pila and pila[-1] != '(' and precedencia.get(pila[-1], 0) >= precedencia[c]:
+                salida += pila.pop()
+            pila.append(c)
+    while pila:
+        salida += pila.pop()
+    return salida
+
+def construir_ast(postfija):
+    pila = []
+    for c in postfija:
+        if c in {'*', '.', '|'}:
+            if c == '*':
+                nodo = NodoAST(c, pila.pop())
+            else:
+                der = pila.pop()
+                izq = pila.pop()
+                nodo = NodoAST(c, izq, der)
+            pila.append(nodo)
+        else:
+            pila.append(NodoAST(c))
+    return pila[0] if pila else None
+
+# Graficar con Graphviz
+def graficar_ast(nodo, nombre_archivo='arbol_ast'):
+    dot = Digraph() # --> Ahí se utiliza el Grafo dirigido
+    
+    def agregar_nodos(n):
+        if n is None:
+            return
+        dot.node(str(id(n)), n.valor)
+        if n.izq:
+            dot.edge(str(id(n)), str(id(n.izq)))
+            agregar_nodos(n.izq)
+        if n.der:
+            dot.edge(str(id(n)), str(id(n.der)))
+            agregar_nodos(n.der)
+
+    agregar_nodos(nodo)
+    dot.render(nombre_archivo, format='pdf', cleanup=True)
+    print(f"✅ AST graficado en {nombre_archivo}.pdf")
 
 if __name__ == "__main__":
     expresion = "a+b?(c|d)*"
@@ -60,8 +103,23 @@ if __name__ == "__main__":
     simplificada = simplificador_expresiones(expresion)
     print("Tras simplificar operadores:", simplificada)
 
-    formateada = format_regex(simplificada)
-    print("Tras formatear con '.':     ", formateada)
+    con_concatenacion = insertar_concatenacion(simplificada)
+    print("Tras formatear con '.':     ", con_concatenacion)
 
-    postfija = infix_to_postfix(formateada)
+    postfija = infix_to_postfix(con_concatenacion)
     print("Expresión postfija:         ", postfija)
+
+    raiz_ast = construir_ast(postfija)
+    print("\nÁrbol de sintaxis abstracta (AST):")
+
+    def imprimir_ast(nodo, nivel=0):
+        if nodo is not None:
+            imprimir_ast(nodo.der, nivel + 1)
+            print('    ' * nivel + str(nodo.valor))
+            imprimir_ast(nodo.izq, nivel + 1)
+    
+    imprimir_ast(raiz_ast)
+    
+    graficar_ast(raiz_ast)
+
+os.startfile('arbol_ast.pdf') # Si se tiene Windows, abre el PDF generado, pero sino se puede abrir manualmente :)
