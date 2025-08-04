@@ -1,23 +1,34 @@
-# Se utiliza librería Graphviz para generar un Grafo dirigido https://graphviz.gitlab.io/download/
 from graphviz import Digraph
-import os
 
-# Nodo AST
-class NodoAST:
-    def __init__(self, valor, izq=None, der=None):
-        self.valor = valor
-        self.izq = izq
-        self.der = der
-
-# Simplificar operaciones
-def simplificador_expresiones(regex):
+# Simplificador de operadores
+def simplificar_expresion(regex):
     resultado = ""
     i = 0
     while i < len(regex):
         c = regex[i]
         if i + 1 < len(regex):
             siguiente = regex[i + 1]
-            if siguiente == '+':
+            if siguiente in ['+', '?'] and c == ')':
+                count = 0
+                j = i
+                while j >= 0:
+                    if regex[j] == ')':
+                        count += 1
+                    elif regex[j] == '(':
+                        count -= 1
+                    if count == 0:
+                        break
+                    j -= 1
+                grupo = regex[j:i+1]
+                if siguiente == '+':
+                    resultado = resultado[:-(i - j + 1)]
+                    resultado += f"{grupo}{grupo}*"
+                else:
+                    resultado = resultado[:-(i - j + 1)]
+                    resultado += f"({grupo}|ε)"
+                i += 2
+                continue
+            elif siguiente == '+':
                 resultado += c + c + '*'
                 i += 2
                 continue
@@ -29,97 +40,101 @@ def simplificador_expresiones(regex):
         i += 1
     return resultado
 
-def insertar_concatenacion(regex):
+def agregar_concatenacion(regex):
     resultado = ""
     for i in range(len(regex) - 1):
-        c1 = regex[i]
-        c2 = regex[i + 1]
+        c1, c2 = regex[i], regex[i + 1]
         resultado += c1
-        if c1 not in '(|' and c2 not in '|)*':
+        if (c1 not in '(|' and c2 not in ')*|'):
             resultado += '.'
     resultado += regex[-1]
     return resultado
 
-# Shunting yard (Lab2)
-def infix_to_postfix(regex):
+def infix_to_postfix(expresion):
     precedencia = {'*': 3, '.': 2, '|': 1}
-    salida = ''
-    pila = []
-    for c in regex:
+    salida, pila = [], []
+    for c in expresion:
         if c.isalnum() or c == 'ε':
-            salida += c
+            salida.append(c)
         elif c == '(':
             pila.append(c)
         elif c == ')':
             while pila and pila[-1] != '(':
-                salida += pila.pop()
-            pila.pop()  # Quita el '('
+                salida.append(pila.pop())
+            if not pila:
+                raise ValueError("Paréntesis desbalanceados.")
+            pila.pop()
         else:
-            while pila and pila[-1] != '(' and precedencia.get(pila[-1], 0) >= precedencia[c]:
-                salida += pila.pop()
+            while pila and pila[-1] != '(' and precedencia.get(pila[-1], 0) >= precedencia.get(c, 0):
+                salida.append(pila.pop())
             pila.append(c)
     while pila:
-        salida += pila.pop()
-    return salida
+        if pila[-1] == '(':
+            raise ValueError("Paréntesis desbalanceados.")
+        salida.append(pila.pop())
+    return ''.join(salida)
+
+# Nodo para AST
+class Nodo:
+    def __init__(self, valor, izquierdo=None, derecho=None):
+        self.valor = valor
+        self.izquierdo = izquierdo
+        self.derecho = derecho
 
 def construir_ast(postfija):
     pila = []
     for c in postfija:
-        if c in {'*', '.', '|'}:
-            if c == '*':
-                nodo = NodoAST(c, pila.pop())
-            else:
-                der = pila.pop()
-                izq = pila.pop()
-                nodo = NodoAST(c, izq, der)
-            pila.append(nodo)
+        if c in '*':
+            nodo = Nodo(c, izquierdo=pila.pop())
+        elif c in '.|':
+            derecho = pila.pop()
+            izquierdo = pila.pop()
+            nodo = Nodo(c, izquierdo, derecho)
         else:
-            pila.append(NodoAST(c))
-    return pila[0] if pila else None
+            nodo = Nodo(c)
+        pila.append(nodo)
+    return pila[-1]
 
-# Graficar con Graphviz
-def graficar_ast(nodo, nombre_archivo='arbol_ast'):
-    dot = Digraph() # --> Ahí se utiliza el Grafo dirigido
+def dibujar_ast(nodo, grafo=None, contador=[0]):
+    if grafo is None:
+        grafo = Digraph(format='png')
+        grafo.attr('node', shape='circle')
     
-    def agregar_nodos(n):
-        if n is None:
-            return
-        dot.node(str(id(n)), n.valor)
-        if n.izq:
-            dot.edge(str(id(n)), str(id(n.izq)))
-            agregar_nodos(n.izq)
-        if n.der:
-            dot.edge(str(id(n)), str(id(n.der)))
-            agregar_nodos(n.der)
+    id_nodo = str(contador[0])
+    grafo.node(id_nodo, nodo.valor)
+    contador[0] += 1
 
-    agregar_nodos(nodo)
-    dot.render(nombre_archivo, format='pdf', cleanup=True)
-    print(f"✅ AST graficado en {nombre_archivo}.pdf")
+    if nodo.izquierdo:
+        id_izq = str(contador[0])
+        dibujar_ast(nodo.izquierdo, grafo, contador)
+        grafo.edge(id_nodo, id_izq)
+    if nodo.derecho:
+        id_der = str(contador[0])
+        dibujar_ast(nodo.derecho, grafo, contador)
+        grafo.edge(id_nodo, id_der)
 
-if __name__ == "__main__":
-    expresion = "a+b?(c|d)*"
-    print("Expresión original:        ", expresion)
+    return grafo
 
-    simplificada = simplificador_expresiones(expresion)
-    print("Tras simplificar operadores:", simplificada)
+with open("expresiones.txt", "r", encoding="utf-8") as archivo:
+    lineas = archivo.read().splitlines()
 
-    con_concatenacion = insertar_concatenacion(simplificada)
-    print("Tras formatear con '.':     ", con_concatenacion)
+for i, expresion in enumerate(lineas, start=1):
+    print(f"\n➤ Expresión {i}: {expresion}")
 
-    postfija = infix_to_postfix(con_concatenacion)
-    print("Expresión postfija:         ", postfija)
+    simplificada = simplificar_expresion(expresion)
+    print(f"  ➤ Simplificada: {simplificada}")
 
-    raiz_ast = construir_ast(postfija)
-    print("\nÁrbol de sintaxis abstracta (AST):")
+    con_concatenacion = agregar_concatenacion(simplificada)
+    print(f"  ➤ Con concatenación: {con_concatenacion}")
 
-    def imprimir_ast(nodo, nivel=0):
-        if nodo is not None:
-            imprimir_ast(nodo.der, nivel + 1)
-            print('    ' * nivel + str(nodo.valor))
-            imprimir_ast(nodo.izq, nivel + 1)
-    
-    imprimir_ast(raiz_ast)
-    
-    graficar_ast(raiz_ast)
+    try:
+        postfija = infix_to_postfix(con_concatenacion)
+        print(f"  ➤ Postfija: {postfija}")
+    except ValueError as e:
+        print(f"  ❌ Error: {e}")
+        continue
 
-os.startfile('arbol_ast.pdf') # Si se tiene Windows, abre el PDF generado, pero sino se puede abrir manualmente :)
+    ast = construir_ast(postfija)
+    grafo = dibujar_ast(ast)
+    grafo.render(f"AST_expresion_{i}", cleanup=True)
+    print(f"  ✅ AST generado: AST_expresion_{i}.png")
